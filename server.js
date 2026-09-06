@@ -161,6 +161,46 @@ app.put('/api/users/:phone/credit', checkAuth, (req, res) => {
     } catch (error) { res.status(500).json({ status: 'error', message: error.message }); }
 });
 
+// 🔴 1. API สำหรับลดเครดิตลูกค้า (PUT)
+app.put('/api/users/:phone/reduce-credit', async (req, res) => {
+    try {
+        const phone = req.params.phone;
+        const { amount } = req.body;
+
+        if (!amount || amount <= 0) {
+            return res.json({ status: 'error', message: 'จำนวนเงินไม่ถูกต้อง' });
+        }
+
+        // 🛠️ นำโค้ดจัดการฐานข้อมูล (MongoDB) ของคุณมาประยุกต์ใส่ตรงนี้ 🛠️
+        // ตัวอย่างเช่น:
+        // const user = await User.findOne({ phone: phone });
+        // if (!user) return res.json({ status: 'error', message: 'ไม่พบผู้ใช้งาน' });
+        // if (user.credit < amount) return res.json({ status: 'error', message: 'เครดิตไม่พอให้ลด' });
+        // user.credit -= Number(amount);
+        // await user.save();
+
+        res.json({ status: 'success', message: 'ลดเครดิตเรียบร้อยแล้ว' });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ status: 'error', message: 'เซิร์ฟเวอร์มีปัญหา' });
+    }
+});
+
+// 🔴 2. API สำหรับลบข้อมูลลูกค้า (DELETE)
+app.delete('/api/users/:phone', async (req, res) => {
+    try {
+        const phone = req.params.phone;
+
+        // 🛠️ นำโค้ดลบฐานข้อมูล (MongoDB) ของคุณมาประยุกต์ใส่ตรงนี้ 🛠️
+        // ตัวอย่างเช่น:
+        // await User.deleteOne({ phone: phone });
+
+        res.json({ status: 'success', message: 'ลบข้อมูลลูกค้าสำเร็จ' });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ status: 'error', message: 'เซิร์ฟเวอร์มีปัญหา' });
+    }
+});
 // ==========================================
 // 💸 API จัดการระบบฝากเงิน (อัปโหลดสลิป)
 // ==========================================
