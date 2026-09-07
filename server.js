@@ -277,11 +277,21 @@ app.post('/api/admin/approve-deposit', checkAuth, async (req, res) => {
     } catch (error) { res.status(500).json({ status: 'error', message: error.message }); }
 });
 
-app.post('/api/admin/reject-deposit', checkAuth, async (req, res) => {
+// 🟢 API สำหรับลบประวัติการแจ้งฝากเงิน
+app.delete('/api/admin/deposits/:id', checkAuth, async (req, res) => {
     try {
-        await Deposit.updateOne({ id: req.body.depositId }, { status: 'rejected' });
-        res.json({ status: 'success', message: 'ยกเลิกรายการสำเร็จ' });
-    } catch (error) { res.status(500).json({ status: 'error', message: error.message }); }
+        const depositId = req.params.id;
+        const deposit = await Deposit.findOneAndDelete({ id: depositId });
+        
+        if (deposit) {
+            io.emit('data_updated', { message: `🗑️ ลบประวัติการแจ้งฝากเงินแล้ว` });
+            res.json({ status: 'success', message: 'ลบประวัติสำเร็จ' });
+        } else {
+            res.status(404).json({ status: 'error', message: 'ไม่พบรายการแจ้งฝากนี้' });
+        }
+    } catch (error) {
+        res.status(500).json({ status: 'error', message: error.message });
+    }
 });
 
 app.post('/api/withdraw', async (req, res) => {
