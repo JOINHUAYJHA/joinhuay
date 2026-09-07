@@ -317,27 +317,52 @@ app.post('/api/admin/reject-withdraw', checkAuth, async (req, res) => {
 // ==========================================
 app.post('/api/bills', async (req, res) => {
     try {
-        const { customerName, lineUserId, items, totalAmount } = req.body;
+        const { customerName, lineUserId, items } = req.body;
         
+        if (!items || !Array.isArray(items)) {
+            return res.status(400).json({ status: 'error', message: 'ข้อมูลรายการไม่ถูกต้อง' });
+        }
+
+        // 1. ให้เซิร์ฟเวอร์คำนวณยอดรวมเอง (เหมือนเวอร์ชันเก่า) ป้องกัน Error เครดิตไม่พอ
+        let totalAmount = 0; 
+        let validItems = [];
+        items.forEach(i => {
+            let p = parseFloat(i.price);
+            if (!isNaN(p) && p > 0) {
+                totalAmount += p;
+                validItems.push({ category: i.category || "ทั่วไป", type: i.type, number: String(i.number).trim(), price: p, status: 'pending', winAmount: 0 });
+            }
+        });
+
+        if (validItems.length === 0) throw new Error("ไม่มีรายการที่สามารถบันทึกได้");
+
+        // 2. ตัดเครดิตลูกค้า
         if (lineUserId) {
             const user = await User.findOne({ phone: lineUserId });
             if (user && user.credit >= totalAmount) {
                 user.credit -= totalAmount;
                 await user.save();
+                io.emit('data_updated', { message: `อัปเดตเครดิต`, targetPhone: lineUserId });
             } else {
                 return res.status(400).json({ status: 'error', message: 'เครดิตไม่พอ' });
             }
         }
 
-        const billIdNew = `B${String(new Date().getDate()).padStart(2,'0')}${String(new Date().getMonth()+1).padStart(2,'0')}-${Date.now().toString().slice(-3)}${Math.floor(1000+Math.random()*9000)}`;
-        await Bill.create({ billId: billIdNew, customerName: customerName || "ลูกค้าทั่วไป", totalAmount, items });
+        // 3. สร้างบิล
+        const d = new Date();
+        const shortDate = String(d.getDate()).padStart(2, '0') + String(d.getMonth() + 1).padStart(2, '0');
+        const billIdNew = `B${shortDate}-${Date.now().toString().slice(-3)}${Math.floor(1000 + Math.random() * 9000)}`;
 
-        // 🟢 4. โค้ดส่วนที่หายไป: แจ้งเตือนเมื่อมีบิลใหม่ 🟢
+        await Bill.create({ billId: billIdNew, customerName: customerName || "ลูกค้าทั่วไป", totalAmount, items: validItems });
+
+        // 4. แจ้งเตือน Telegram
         sendTelegramNotify(`🧾 โพยใหม่!\nลูกค้า: ${customerName || "ลูกค้าทั่วไป"}\nยอดรวม: ${totalAmount} ฿`);
         io.emit('data_updated', { message: `📥 มีบิลใหม่เข้า: ${customerName || "ลูกค้าทั่วไป"} (${totalAmount} ฿)` });
 
         res.json({ status: 'success', billId: billIdNew });
-    } catch (error) { res.status(500).json({ status: 'error', message: error.message }); }
+    } catch (error) { 
+        res.status(500).json({ status: 'error', message: error.message }); 
+    }
 });
 
 app.get('/api/bills', checkAuth, async (req, res) => {
