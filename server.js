@@ -531,7 +531,11 @@ app.post('/api/archive', checkAuth, async (req, res) => {
     await Bill.deleteMany({});
     res.json({ status: 'success', message: 'ตัดรอบบิลเรียบร้อยแล้ว' });
 });
+// ตัวอย่างโค้ดหลังบ้านตอนลูกค้ากดส่งโพย หรือ ทำรายการฝาก/ถอนสำเร็จ
+// ... (โค้ดบันทึกลง Database ของคุณ) ...
 
+// 🟢 เพิ่มบรรทัดนี้ลงไปเพื่อยิงสัญญาณไปที่หน้าแอดมิน
+io.emit('data_updated', { action: 'new_bill', message: 'มีโพยใหม่เข้า' });
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
   console.log(`🚀 [MongoDB Production] Server เปิดรันอยู่ที่พอร์ต ${PORT}`);
