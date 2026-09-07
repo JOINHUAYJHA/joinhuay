@@ -160,6 +160,10 @@ app.put('/api/users/:phone/credit', checkAuth, async (req, res) => {
         await user.save();
         
         io.emit('data_updated', { message: `🎉 อัปเดตเครดิตลูกค้าแล้ว` });
+        
+        // 🟢 เพิ่มคำสั่งนี้: ส่งสัญญาณเตือนไปที่หน้าจอลูกค้าคนนี้โดยเฉพาะ
+        io.emit('credit_updated', { phone: user.phone, newCredit: user.credit, type: 'add' });
+
         res.json({ status: 'success', message: 'อัปเดตเครดิตสำเร็จ', newCredit: user.credit });
     } catch (error) { res.status(500).json({ status: 'error', message: error.message }); }
 });
@@ -176,6 +180,10 @@ app.put('/api/users/:phone/reduce-credit', checkAuth, async (req, res) => {
         await user.save();
         
         io.emit('data_updated', { message: `📉 หักเครดิตลูกค้าเรียบร้อย` });
+
+        // 🟢 เพิ่มคำสั่งนี้: แจ้งเตือนลดเครดิต
+        io.emit('credit_updated', { phone: user.phone, newCredit: user.credit, type: 'reduce' });
+
         res.json({ status: 'success', message: 'ลดเครดิตสำเร็จ' });
     } catch (error) { res.status(500).json({ status: 'error', message: error.message }); }
 });
@@ -254,7 +262,15 @@ app.post('/api/admin/approve-deposit', checkAuth, async (req, res) => {
         
         dp.status = 'approved';
         await dp.save();
-        await User.updateOne({ phone: dp.phone }, { $inc: { credit: dp.amount } });
+        
+        const user = await User.findOne({ phone: dp.phone });
+        if (user) {
+            user.credit += dp.amount;
+            await user.save();
+            
+            // 🟢 เพิ่มคำสั่งนี้: แจ้งเตือนลูกค้าว่าเงินฝากเข้าแล้ว!
+            io.emit('credit_updated', { phone: user.phone, newCredit: user.credit, type: 'add' });
+        }
         
         io.emit('data_updated', { message: `✅ อนุมัติยอดฝากแล้ว` });
         res.json({ status: 'success', message: 'อนุมัติเรียบร้อย' });
