@@ -17,7 +17,7 @@ app.use(express.json({ limit: '50mb' }));
 app.get('/keep-awake', (req, res) => res.status(200).send('I am awake!'));
 
 // ==========================================
-// 💽 เชื่อมต่อฐานข้อมูล MongoDB แบบถาวร
+// 💽 เชื่อมต่อฐานข้อมูล MongoDB
 // ==========================================
 if (process.env.MONGODB_URI) {
     mongoose.connect(process.env.MONGODB_URI, {
@@ -43,10 +43,10 @@ const userSchema = new mongoose.Schema({
 const User = mongoose.model('User', userSchema);
 
 const billSchema = new mongoose.Schema({
-    billId: String, customerName: String, totalAmount: Number,
+    billId: String, customerName: String, totalAmount: Number, 
     items: Array, 
-    status: { type: String, default: 'pending' }, // 🟢 เพิ่มสถานะรวมของบิล
-    winAmount: { type: Number, default: 0 }, // 🟢 เพิ่มยอดเงินรางวัลรวมในบิล
+    status: { type: String, default: 'pending' }, 
+    winAmount: { type: Number, default: 0 }, 
     createdAt: { type: Date, default: Date.now }
 });
 const Bill = mongoose.model('Bill', billSchema);
@@ -164,7 +164,6 @@ app.put('/api/users/:phone/credit', checkAuth, async (req, res) => {
     } catch (error) { res.status(500).json({ status: 'error', message: error.message }); }
 });
 
-// 🟢 1. โค้ดส่วนที่หายไป: ลดเครดิตลูกค้า 🟢
 app.put('/api/users/:phone/reduce-credit', checkAuth, async (req, res) => {
     try {
         const user = await User.findOne({ phone: req.params.phone });
@@ -181,7 +180,6 @@ app.put('/api/users/:phone/reduce-credit', checkAuth, async (req, res) => {
     } catch (error) { res.status(500).json({ status: 'error', message: error.message }); }
 });
 
-// 🟢 2. โค้ดส่วนที่หายไป: ลบข้อมูลลูกค้า 🟢
 app.delete('/api/users/:phone', checkAuth, async (req, res) => {
     try {
         const result = await User.deleteOne({ phone: req.params.phone });
@@ -212,11 +210,9 @@ app.post('/api/user/unban/:phone', checkAuth, async (req, res) => {
     } catch (error) { res.status(500).json({ status: 'error', message: error.message }); }
 });
 
-
 // ==========================================
 // 💸 API ฝาก / ถอนเงิน
 // ==========================================
-// 🟢 3. โค้ดส่วนที่หายไป: ดึงข้อมูลบัญชีแอดมินให้ลูกค้าโอน 🟢
 app.get('/api/admin/bank-info', async (req, res) => {
     try {
         const doc = await AppData.findOne({ key: 'adminBank' });
@@ -238,8 +234,6 @@ app.post('/api/deposit', async (req, res) => {
         await Deposit.create({ id: 'DP' + Date.now().toString().slice(-6), phone, name: `${user.firstName} ${user.lastName}`, amount, slipImage, status: 'pending' });
         
         io.emit('data_updated', { message: `💸 แจ้งฝากใหม่: ยอด ${amount} บาท` });
-        
-        // 🟢 เพิ่มคำสั่งแจ้งเตือน Telegram กลับเข้ามา
         sendTelegramNotify(`💸 <b>แจ้งฝากเงินใหม่!</b>\nจาก: ${user.firstName} ${user.lastName}\nยอด: ${amount} บาท\nรอตรวจสอบสลิป`);
 
         res.json({ status: 'success', message: 'ส่งรายการแจ้งฝากเรียบร้อย' });
@@ -286,8 +280,6 @@ app.post('/api/withdraw', async (req, res) => {
         await Withdrawal.create({ id: 'WD' + Date.now().toString().slice(-6), phone, name: `${user.firstName} ${user.lastName}`, bankName: user.bankName, bankAccount: user.bankAccount, amount, status: 'pending' });
         
         io.emit('data_updated', { message: `💳 แจ้งถอนเงินใหม่` });
-        
-        // 🟢 เพิ่มคำสั่งแจ้งเตือน Telegram กลับเข้ามา
         sendTelegramNotify(`💳 <b>แจ้งถอนเงิน!</b>\nจาก: ${user.firstName} ${user.lastName}\nยอด: ${amount} บาท\nธนาคาร: ${user.bankName} (${user.bankAccount})`);
 
         res.json({ status: 'success', message: 'แจ้งถอนเรียบร้อย' });
@@ -310,7 +302,7 @@ app.post('/api/admin/reject-withdraw', checkAuth, async (req, res) => {
     if(wd && wd.status === 'pending') {
         wd.status = 'rejected';
         await wd.save();
-        await User.updateOne({ phone: wd.phone }, { $inc: { credit: wd.amount } }); // คืนเงิน
+        await User.updateOne({ phone: wd.phone }, { $inc: { credit: wd.amount } }); 
         res.json({ status: 'success', message: 'คืนเงินเรียบร้อย' });
     }
 });
@@ -318,7 +310,6 @@ app.post('/api/admin/reject-withdraw', checkAuth, async (req, res) => {
 // ==========================================
 // 🧾 API จัดการบิลและประวัติการแทง
 // ==========================================
-
 app.post('/api/bills', async (req, res) => {
     try {
         const { customerName, lineUserId, items } = req.body;
@@ -327,7 +318,6 @@ app.post('/api/bills', async (req, res) => {
             return res.status(400).json({ status: 'error', message: 'ข้อมูลรายการไม่ถูกต้อง' });
         }
 
-        // 1. ให้เซิร์ฟเวอร์คำนวณยอดรวมเอง (เหมือนเวอร์ชันเก่า) ป้องกัน Error เครดิตไม่พอ
         let totalAmount = 0; 
         let validItems = [];
         items.forEach(i => {
@@ -339,7 +329,7 @@ app.post('/api/bills', async (req, res) => {
                     type: i.type, 
                     number: String(i.number).trim(), 
                     price: p, 
-                    rate: parseFloat(i.rate) || 0, // 🟢 เพิ่มบรรทัดนี้เพื่อบันทึกเรตจ่าย (รวมเรตอั้น) ลงในฐานข้อมูล
+                    rate: parseFloat(i.rate) || 0,
                     status: 'pending', 
                     winAmount: 0 
                 });
@@ -348,7 +338,6 @@ app.post('/api/bills', async (req, res) => {
 
         if (validItems.length === 0) throw new Error("ไม่มีรายการที่สามารถบันทึกได้");
 
-        // 2. ตัดเครดิตลูกค้า
         if (lineUserId) {
             const user = await User.findOne({ phone: lineUserId });
             if (user && user.credit >= totalAmount) {
@@ -360,12 +349,10 @@ app.post('/api/bills', async (req, res) => {
             }
         }
 
-        // 3. สร้างบิล
         const d = new Date();
         const shortDate = String(d.getDate()).padStart(2, '0') + String(d.getMonth() + 1).padStart(2, '0');
         const billIdNew = `B${shortDate}-${Date.now().toString().slice(-3)}${Math.floor(1000 + Math.random() * 9000)}`;
 
-        // 🟢 เพิ่ม status และ winAmount ลงไปตอนสร้างบิลใหม่
         await Bill.create({ 
             billId: billIdNew, 
             customerName: customerName || "ลูกค้าทั่วไป", 
@@ -375,15 +362,13 @@ app.post('/api/bills', async (req, res) => {
             winAmount: 0
         });
 
-        // 4. แจ้งเตือน Telegram
         sendTelegramNotify(`🧾 โพยใหม่!\nลูกค้า: ${customerName || "ลูกค้าทั่วไป"}\nยอดรวม: ${totalAmount} ฿`);
         io.emit('data_updated', { message: `📥 มีบิลใหม่เข้า: ${customerName || "ลูกค้าทั่วไป"} (${totalAmount} ฿)` });
 
         res.json({ status: 'success', billId: billIdNew });
-    } catch (error) { 
-        res.status(500).json({ status: 'error', message: error.message }); 
-    }
+    } catch (error) { res.status(500).json({ status: 'error', message: error.message }); }
 });
+
 app.get('/api/bills', checkAuth, async (req, res) => {
     try {
         const bills = await Bill.find().sort({ createdAt: -1 });
@@ -433,7 +418,7 @@ app.post('/api/appdata', checkAuth, async (req, res) => {
 });
 
 // ==========================================
-// 🏆 API ระบบอื่นๆ (ตรวจรางวัล, ป๊อปอัป, ตั้งค่าเว็บ)
+// 🏆 API ตรวจผลรางวัล
 // ==========================================
 app.post('/api/admin/process-results', checkAuth, async (req, res) => {
     try {
@@ -449,7 +434,6 @@ app.post('/api/admin/process-results', checkAuth, async (req, res) => {
                 if ((!category || item.category === category) && item.status === 'pending') {
                     let isWin = false;
 
-                    // 🟢 ตรวจรางวัลอย่างเดียว ไม่ต้องคำนวณเรตตรงนี้แล้ว เพราะเราใช้เรตที่บันทึกไว้ในบิลตอนลูกค้าซื้อ
                     if (item.type === '3 บน' && item.number === top3) { isWin = true; }
                     else if (item.type === '3 โต๊ด' && top3) {
                         let inputArr = item.number.split('').sort().join('');
@@ -463,7 +447,7 @@ app.post('/api/admin/process-results', checkAuth, async (req, res) => {
 
                     if (isWin) {
                         item.status = 'win';
-                        item.winAmount = item.price * (item.rate || 0); // 🟢 ให้เอาเงินที่แทง x เรตจ่ายที่บันทึกไว้ในบิล (ถ้าโดนอั้นก็จะได้เงินตามเรตอั้น)
+                        item.winAmount = item.price * (item.rate || 0); 
                         billTotalWin += item.winAmount;
                     } else {
                         item.status = 'lose';
@@ -475,17 +459,14 @@ app.post('/api/admin/process-results', checkAuth, async (req, res) => {
             }
 
             if (hasUpdate) {
-                // 🟢 เช็คว่าบิลนี้ตรวจครบทุกตัวเลขที่แทงหรือยัง
                 let isAllProcessed = newItems.every(i => i.status !== 'pending');
                 let finalStatus = bill.status || 'pending';
                 
                 if (isAllProcessed) {
-                    // ถ้าตรวจครบแล้ว ให้เช็คว่าในบิลมีถูกรางวัลสักตัวไหม
                     let hasWin = newItems.some(i => i.status === 'win');
                     finalStatus = hasWin ? 'win' : 'lose';
                 }
 
-                // 🟢 สั่งบันทึกสถานะบิล และยอดเงินที่ถูกรางวัลทั้งหมด
                 await Bill.updateOne(
                     { _id: bill._id }, 
                     { 
@@ -495,6 +476,20 @@ app.post('/api/admin/process-results', checkAuth, async (req, res) => {
                     }
                 );
             }
+
+            if (billTotalWin > 0 && hasUpdate) {
+                let allUsers = await User.find();
+                let targetUser = allUsers.find(u => `${u.firstName} ${u.lastName}` === bill.customerName);
+                if (targetUser) {
+                    targetUser.credit = (targetUser.credit || 0) + billTotalWin;
+                    await targetUser.save();
+                }
+            }
+        }
+        io.emit('data_updated', { message: `🏆 ประกาศผลรางวัลแล้ว! ระบบได้ปรับยอดเงินให้ผู้โชคดีเรียบร้อยค่ะ` });
+        res.json({ status: 'success', message: 'ตรวจผลรางวัลและจ่ายเงินสำเร็จ' });
+    } catch(err) { res.status(500).json({ status:'error', message: err.message }); }
+});
 
 app.get('/api/admin/popup-setting', async (req, res) => {
     const doc = await AppData.findOne({ key: 'popupSetting' });
