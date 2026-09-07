@@ -424,7 +424,6 @@ app.post('/api/appdata', checkAuth, async (req, res) => {
 // ==========================================
 // 🏆 API ระบบอื่นๆ (ตรวจรางวัล, ป๊อปอัป, ตั้งค่าเว็บ)
 // ==========================================
-// 🟢 5. โค้ดส่วนที่หายไป: ตรวจรางวัลแล้วจ่ายเงินจริงๆ (ตัดเครดิต) 🟢
 app.post('/api/admin/process-results', checkAuth, async (req, res) => {
     try {
         const { category, top3, top2, bot2 } = req.body;
@@ -438,22 +437,22 @@ app.post('/api/admin/process-results', checkAuth, async (req, res) => {
             for (let item of bill.items) {
                 if ((!category || item.category === category) && item.status === 'pending') {
                     let isWin = false;
-                    let rate = 0;
 
-                    if (item.type === '3 บน' && item.number === top3) { isWin = true; rate = 800; }
+                    // 🟢 ตรวจรางวัลอย่างเดียว ไม่ต้องคำนวณเรตตรงนี้แล้ว เพราะเราใช้เรตที่บันทึกไว้ในบิลตอนลูกค้าซื้อ
+                    if (item.type === '3 บน' && item.number === top3) { isWin = true; }
                     else if (item.type === '3 โต๊ด' && top3) {
                         let inputArr = item.number.split('').sort().join('');
                         let winArr = top3.split('').sort().join('');
-                        if (inputArr === winArr) { isWin = true; rate = 130; }
+                        if (inputArr === winArr) { isWin = true; }
                     }
-                    else if (item.type === '2 บน' && item.number === top2) { isWin = true; rate = 90; }
-                    else if (item.type === '2 ล่าง' && item.number === bot2) { isWin = true; rate = 90; }
-                    else if (item.type === 'วิ่งบน' && top3 && top3.includes(item.number)) { isWin = true; rate = 3.2; }
-                    else if (item.type === 'วิ่งล่าง' && bot2 && bot2.includes(item.number)) { isWin = true; rate = 4.2; }
+                    else if (item.type === '2 บน' && item.number === top2) { isWin = true; }
+                    else if (item.type === '2 ล่าง' && item.number === bot2) { isWin = true; }
+                    else if (item.type === 'วิ่งบน' && top3 && top3.includes(item.number)) { isWin = true; }
+                    else if (item.type === 'วิ่งล่าง' && bot2 && bot2.includes(item.number)) { isWin = true; }
 
                     if (isWin) {
                         item.status = 'win';
-                        item.winAmount = item.price * rate; 
+                        item.winAmount = item.price * (item.rate || 0); // 🟢 ให้เอาเงินที่แทง x เรตจ่ายที่บันทึกไว้ในบิล (ถ้าโดนอั้นก็จะได้เงินตามเรตอั้น)
                         billTotalWin += item.winAmount;
                     } else {
                         item.status = 'lose';
