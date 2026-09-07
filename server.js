@@ -235,6 +235,10 @@ app.post('/api/deposit', async (req, res) => {
         await Deposit.create({ id: 'DP' + Date.now().toString().slice(-6), phone, name: `${user.firstName} ${user.lastName}`, amount, slipImage, status: 'pending' });
         
         io.emit('data_updated', { message: `💸 แจ้งฝากใหม่: ยอด ${amount} บาท` });
+        
+        // 🟢 เพิ่มคำสั่งแจ้งเตือน Telegram กลับเข้ามา
+        sendTelegramNotify(`💸 <b>แจ้งฝากเงินใหม่!</b>\nจาก: ${user.firstName} ${user.lastName}\nยอด: ${amount} บาท\nรอตรวจสอบสลิป`);
+
         res.json({ status: 'success', message: 'ส่งรายการแจ้งฝากเรียบร้อย' });
     } catch (error) { res.status(500).json({ status: 'error', message: error.message }); }
 });
@@ -267,7 +271,6 @@ app.post('/api/admin/reject-deposit', checkAuth, async (req, res) => {
     } catch (error) { res.status(500).json({ status: 'error', message: error.message }); }
 });
 
-// ถอนเงิน
 app.post('/api/withdraw', async (req, res) => {
     try {
         const { phone, amount } = req.body;
@@ -280,6 +283,10 @@ app.post('/api/withdraw', async (req, res) => {
         await Withdrawal.create({ id: 'WD' + Date.now().toString().slice(-6), phone, name: `${user.firstName} ${user.lastName}`, bankName: user.bankName, bankAccount: user.bankAccount, amount, status: 'pending' });
         
         io.emit('data_updated', { message: `💳 แจ้งถอนเงินใหม่` });
+        
+        // 🟢 เพิ่มคำสั่งแจ้งเตือน Telegram กลับเข้ามา
+        sendTelegramNotify(`💳 <b>แจ้งถอนเงิน!</b>\nจาก: ${user.firstName} ${user.lastName}\nยอด: ${amount} บาท\nธนาคาร: ${user.bankName} (${user.bankAccount})`);
+
         res.json({ status: 'success', message: 'แจ้งถอนเรียบร้อย' });
     } catch (error) { res.status(500).json({ status: 'error', message: error.message }); }
 });
