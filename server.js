@@ -43,8 +43,11 @@ const userSchema = new mongoose.Schema({
 const User = mongoose.model('User', userSchema);
 
 const billSchema = new mongoose.Schema({
-    billId: String, customerName: String, totalAmount: Number, 
-    items: Array, createdAt: { type: Date, default: Date.now }
+    billId: String, customerName: String, totalAmount: Number,
+    items: Array, 
+    status: { type: String, default: 'pending' }, // 🟢 เพิ่มสถานะรวมของบิล
+    winAmount: { type: Number, default: 0 }, // 🟢 เพิ่มยอดเงินรางวัลรวมในบิล
+    createdAt: { type: Date, default: Date.now }
 });
 const Bill = mongoose.model('Bill', billSchema);
 
@@ -362,7 +365,15 @@ app.post('/api/bills', async (req, res) => {
         const shortDate = String(d.getDate()).padStart(2, '0') + String(d.getMonth() + 1).padStart(2, '0');
         const billIdNew = `B${shortDate}-${Date.now().toString().slice(-3)}${Math.floor(1000 + Math.random() * 9000)}`;
 
-        await Bill.create({ billId: billIdNew, customerName: customerName || "ลูกค้าทั่วไป", totalAmount, items: validItems });
+        // 🟢 เพิ่ม status และ winAmount ลงไปตอนสร้างบิลใหม่
+        await Bill.create({ 
+            billId: billIdNew, 
+            customerName: customerName || "ลูกค้าทั่วไป", 
+            totalAmount, 
+            items: validItems,
+            status: 'pending',
+            winAmount: 0
+        });
 
         // 4. แจ้งเตือน Telegram
         sendTelegramNotify(`🧾 โพยใหม่!\nลูกค้า: ${customerName || "ลูกค้าทั่วไป"}\nยอดรวม: ${totalAmount} ฿`);
@@ -464,22 +475,26 @@ app.post('/api/admin/process-results', checkAuth, async (req, res) => {
             }
 
             if (hasUpdate) {
-                await Bill.updateOne({ _id: bill._id }, { items: newItems });
-            }
-
-            if (billTotalWin > 0 && hasUpdate) {
-                let allUsers = await User.find();
-                let targetUser = allUsers.find(u => `${u.firstName} ${u.lastName}` === bill.customerName);
-                if (targetUser) {
-                    targetUser.credit = (targetUser.credit || 0) + billTotalWin;
-                    await targetUser.save();
+                // 🟢 เช็คว่าบิลนี้ตรวจครบทุกตัวเลขที่แทงหรือยัง
+                let isAllProcessed = newItems.every(i => i.status !== 'pending');
+                let finalStatus = bill.status || 'pending';
+                
+                if (isAllProcessed) {
+                    // ถ้าตรวจครบแล้ว ให้เช็คว่าในบิลมีถูกรางวัลสักตัวไหม
+                    let hasWin = newItems.some(i => i.status === 'win');
+                    finalStatus = hasWin ? 'win' : 'lose';
                 }
+
+                // 🟢 สั่งบันทึกสถานะบิล และยอดเงินที่ถูกรางวัลทั้งหมด
+                await Bill.updateOne(
+                    { _id: bill._id }, 
+                    { 
+                        items: newItems,
+                        status: finalStatus, 
+                        winAmount: (bill.winAmount || 0) + billTotalWin 
+                    }
+                );
             }
-        }
-        io.emit('data_updated', { message: `🏆 ประกาศผลรางวัลแล้ว! ระบบได้ปรับยอดเงินให้ผู้โชคดีเรียบร้อยค่ะ` });
-        res.json({ status: 'success', message: 'ตรวจผลรางวัลและจ่ายเงินสำเร็จ' });
-    } catch(err) { res.status(500).json({ status:'error', message: err.message }); }
-});
 
 app.get('/api/admin/popup-setting', async (req, res) => {
     const doc = await AppData.findOne({ key: 'popupSetting' });
