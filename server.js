@@ -308,19 +308,45 @@ app.get('/api/admin/withdrawals', checkAuth, async (req, res) => {
 });
 
 app.post('/api/admin/approve-withdraw', checkAuth, async (req, res) => {
-    await Withdrawal.updateOne({ id: req.body.withdrawId }, { status: 'approved' });
-    io.emit('data_updated', { message: `✅ โอนเงินให้ลูกค้าแล้ว` });
-    res.json({ status: 'success', message: 'อนุมัติเรียบร้อย' });
+    try {
+        const wd = await Withdrawal.findOne({ id: req.body.withdrawId });
+        if (wd && wd.status === 'pending') {
+            wd.status = 'approved';
+            await wd.save();
+            
+            // ดึงข้อมูลลูกค้ามาเพื่อส่งแจ้งเตือน (เงินถูกหักไปตั้งแต่ตอนกดถอนแล้ว จึงไม่ต้องหักซ้ำ)
+            const user = await User.findOne({ phone: wd.phone });
+            if (user) {
+                // 🟢 แจ้งเตือนลูกค้าว่าโอนเงินให้แล้ว
+                io.emit('credit_updated', { phone: user.phone, newCredit: user.credit, type: 'withdraw_success' });
+            }
+        }
+        io.emit('data_updated', { message: `✅ โอนเงินให้ลูกค้าแล้ว` });
+        res.json({ status: 'success', message: 'อนุมัติเรียบร้อย' });
+    } catch (error) { res.status(500).json({ status: 'error', message: error.message }); }
 });
 
 app.post('/api/admin/reject-withdraw', checkAuth, async (req, res) => {
-    const wd = await Withdrawal.findOne({ id: req.body.withdrawId });
-    if(wd && wd.status === 'pending') {
-        wd.status = 'rejected';
-        await wd.save();
-        await User.updateOne({ phone: wd.phone }, { $inc: { credit: wd.amount } }); 
-        res.json({ status: 'success', message: 'คืนเงินเรียบร้อย' });
-    }
+    try {
+        const wd = await Withdrawal.findOne({ id: req.body.withdrawId });
+        if(wd && wd.status === 'pending') {
+            wd.status = 'rejected';
+            await wd.save();
+            
+            // คืนเครดิตให้ลูกค้า
+            const user = await User.findOne({ phone: wd.phone });
+            if (user) {
+                user.credit += wd.amount;
+                await user.save();
+                
+                // 🟢 แจ้งเตือนลูกค้าว่ายกเลิกการถอนและคืนเครดิตแล้ว
+                io.emit('credit_updated', { phone: user.phone, newCredit: user.credit, type: 'withdraw_reject' });
+            }
+            res.json({ status: 'success', message: 'คืนเงินเรียบร้อย' });
+        } else {
+            res.status(400).json({ status: 'error', message: 'ไม่สามารถยกเลิกรายการนี้ได้' });
+        }
+    } catch (error) { res.status(500).json({ status: 'error', message: error.message }); }
 });
 
 // ==========================================
