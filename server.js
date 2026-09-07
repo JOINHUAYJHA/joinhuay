@@ -315,6 +315,7 @@ app.post('/api/admin/reject-withdraw', checkAuth, async (req, res) => {
 // ==========================================
 // 🧾 API จัดการบิลและประวัติการแทง
 // ==========================================
+
 app.post('/api/bills', async (req, res) => {
     try {
         const { customerName, lineUserId, items } = req.body;
@@ -330,7 +331,15 @@ app.post('/api/bills', async (req, res) => {
             let p = parseFloat(i.price);
             if (!isNaN(p) && p > 0) {
                 totalAmount += p;
-                validItems.push({ category: i.category || "ทั่วไป", type: i.type, number: String(i.number).trim(), price: p, status: 'pending', winAmount: 0 });
+                validItems.push({ 
+                    category: i.category || "ทั่วไป", 
+                    type: i.type, 
+                    number: String(i.number).trim(), 
+                    price: p, 
+                    rate: parseFloat(i.rate) || 0, // 🟢 เพิ่มบรรทัดนี้เพื่อบันทึกเรตจ่าย (รวมเรตอั้น) ลงในฐานข้อมูล
+                    status: 'pending', 
+                    winAmount: 0 
+                });
             }
         });
 
@@ -364,7 +373,6 @@ app.post('/api/bills', async (req, res) => {
         res.status(500).json({ status: 'error', message: error.message }); 
     }
 });
-
 app.get('/api/bills', checkAuth, async (req, res) => {
     try {
         const bills = await Bill.find().sort({ createdAt: -1 });
