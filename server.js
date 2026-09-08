@@ -71,6 +71,41 @@ const appDataSchema = new mongoose.Schema({
 const AppData = mongoose.model('AppData', appDataSchema);
 
 // ==========================================
+// 👨‍💼 ระบบพนักงาน (Employee Schema)
+// ==========================================
+const employeeSchema = new mongoose.Schema({
+    username: { type: String, required: true, unique: true },
+    password: { type: String, required: true },
+    name: { type: String, required: true },
+    role: { type: String, default: 'employee' },
+    token: { type: String },
+    createdAt: { type: Date, default: Date.now }
+});
+const Employee = mongoose.model('Employee', employeeSchema);
+
+// ==========================================
+// 🕵️ ระบบเก็บประวัติการทำงาน (Audit Log)
+// ==========================================
+const activityLogSchema = new mongoose.Schema({
+    adminName: String, 
+    adminRole: String, 
+    action: String,    
+    target: String,    
+    details: String,   
+    createdAt: { type: Date, default: Date.now }
+});
+const ActivityLog = mongoose.model('ActivityLog', activityLogSchema);
+
+// ฟังก์ชันบันทึกประวัติอัตโนมัติ
+const logActivity = async (req, action, target, details) => {
+    try {
+        const adminName = req.user ? req.user.name : 'System';
+        const adminRole = req.user ? req.user.role : 'system';
+        await ActivityLog.create({ adminName, adminRole, action, target, details });
+    } catch (err) { console.error('Log Error:', err); }
+};
+
+// ==========================================
 // 📢 ระบบส่งแจ้งเตือน Telegram
 // ==========================================
 const sendTelegramNotify = async (message) => {
@@ -90,21 +125,6 @@ const sendTelegramNotify = async (message) => {
   } catch (error) { console.error('❌ ส่ง Telegram ไม่สำเร็จ'); }
 };
 
-
-
-// ==========================================
-// 👨‍💼 ระบบพนักงาน (Employee Schema)
-// ==========================================
-const employeeSchema = new mongoose.Schema({
-    username: { type: String, required: true, unique: true },
-    password: { type: String, required: true },
-    name: { type: String, required: true },
-    role: { type: String, default: 'employee' },
-    token: { type: String },
-    createdAt: { type: Date, default: Date.now }
-});
-const Employee = mongoose.model('Employee', employeeSchema);
-
 let currentAdminOTP = null; // ตัวแปรเก็บรหัส OTP ชั่วคราว
 
 // ==========================================
@@ -114,7 +134,7 @@ const checkAuth = async (req, res, next) => {
     const token = req.headers['authorization'];
     if (!token) return res.status(403).json({ status: 'error', message: 'Unauthorized' });
 
-    // 1. เช็คว่าเป็น Master Admin (เจ้าของเว็บ) ใช้ PIN เดิม
+    // 1. เช็คว่าเป็น Master Admin (เจ้าของเว็บ)
     if (token === (process.env.ADMIN_PIN || "1234")) {
         req.user = { role: 'master', name: 'Admin Master' };
         return next();
@@ -195,6 +215,14 @@ app.delete('/api/admin/employees/:id', checkAuth, async (req, res) => {
     await Employee.findByIdAndDelete(req.params.id);
     res.json({ status: 'success', message: 'ลบพนักงานเรียบร้อย' });
 });
+
+// API สำหรับดึงประวัติมาดู (เฉพาะเจ้าของ)
+app.get('/api/admin/activity-logs', checkAuth, async (req, res) => {
+    if (req.user.role !== 'master') return res.status(403).json({ status: 'error', message: 'เฉพาะเจ้าของเว็บเท่านั้น' });
+    const logs = await ActivityLog.find().sort({ createdAt: -1 }).limit(300);
+    res.json({ status: 'success', data: logs });
+});
+
 // ==========================================
 // 👤 API ระบบสมาชิกลูกค้า
 // ==========================================
@@ -250,9 +278,8 @@ app.put('/api/users/:phone/credit', checkAuth, async (req, res) => {
         user.credit += parseFloat(req.body.amount);
         await user.save();
         
+        logActivity(req, '➕ เพิ่มเครดิต', user.phone, `จำนวน ${req.body.amount} บาท`);
         io.emit('data_updated', { message: `🎉 อัปเดตเครดิตลูกค้าแล้ว` });
-        
-        // 🟢 เพิ่มคำสั่งนี้: ส่งสัญญาณเตือนไปที่หน้าจอลูกค้าคนนี้โดยเฉพาะ
         io.emit('credit_updated', { phone: user.phone, newCredit: user.credit, type: 'add' });
 
         res.json({ status: 'success', message: 'อัปเดตเครดิตสำเร็จ', newCredit: user.credit });
@@ -270,9 +297,8 @@ app.put('/api/users/:phone/reduce-credit', checkAuth, async (req, res) => {
         user.credit -= amount;
         await user.save();
         
+        logActivity(req, '➖ ลดเครดิต', user.phone, `จำนวน ${amount} บาท`);
         io.emit('data_updated', { message: `📉 หักเครดิตลูกค้าเรียบร้อย` });
-
-        // 🟢 เพิ่มคำสั่งนี้: แจ้งเตือนลดเครดิต
         io.emit('credit_updated', { phone: user.phone, newCredit: user.credit, type: 'reduce' });
 
         res.json({ status: 'success', message: 'ลดเครดิตสำเร็จ' });
@@ -283,6 +309,8 @@ app.delete('/api/users/:phone', checkAuth, async (req, res) => {
     try {
         const result = await User.deleteOne({ phone: req.params.phone });
         if (result.deletedCount === 0) return res.status(404).json({ status: 'error', message: 'ไม่พบข้อมูลลูกค้านี้' });
+        
+        logActivity(req, '🗑️ ลบลูกค้า', req.params.phone, `ลบออกจากระบบ`);
         res.json({ status: 'success', message: 'ลบข้อมูลสำเร็จ' });
     } catch (error) { res.status(500).json({ status: 'error', message: error.message }); }
 });
@@ -298,6 +326,7 @@ app.post('/api/user/updateBank/:phone', checkAuth, async (req, res) => {
 app.post('/api/user/ban/:phone', checkAuth, async (req, res) => {
     try {
         await User.updateOne({ phone: req.params.phone }, { isBanned: true });
+        logActivity(req, '🚫 แบนลูกค้า', req.params.phone, `ระงับการใช้งาน`);
         res.json({ status: 'success', message: 'แบนสำเร็จ' });
     } catch (error) { res.status(500).json({ status: 'error', message: error.message }); }
 });
@@ -305,6 +334,7 @@ app.post('/api/user/ban/:phone', checkAuth, async (req, res) => {
 app.post('/api/user/unban/:phone', checkAuth, async (req, res) => {
     try {
         await User.updateOne({ phone: req.params.phone }, { isBanned: false });
+        logActivity(req, '✅ ปลดแบนลูกค้า', req.params.phone, `คืนสิทธิ์การใช้งาน`);
         res.json({ status: 'success', message: 'ปลดแบนสำเร็จ' });
     } catch (error) { res.status(500).json({ status: 'error', message: error.message }); }
 });
@@ -358,23 +388,22 @@ app.post('/api/admin/approve-deposit', checkAuth, async (req, res) => {
         if (user) {
             user.credit += dp.amount;
             await user.save();
-            
-            // 🟢 เพิ่มคำสั่งนี้: แจ้งเตือนลูกค้าว่าเงินฝากเข้าแล้ว!
             io.emit('credit_updated', { phone: user.phone, newCredit: user.credit, type: 'add' });
         }
         
+        logActivity(req, '✅ อนุมัติฝากเงิน', dp.phone, `ยอด ${dp.amount} บาท (รหัส: ${dp.id})`);
         io.emit('data_updated', { message: `✅ อนุมัติยอดฝากแล้ว` });
         res.json({ status: 'success', message: 'อนุมัติเรียบร้อย' });
     } catch (error) { res.status(500).json({ status: 'error', message: error.message }); }
 });
 
-// 🟢 API สำหรับลบประวัติการแจ้งฝากเงิน
 app.delete('/api/admin/deposits/:id', checkAuth, async (req, res) => {
     try {
         const depositId = req.params.id;
         const deposit = await Deposit.findOneAndDelete({ id: depositId });
         
         if (deposit) {
+            logActivity(req, '🗑️ ลบรายการฝากเงิน', deposit.phone, `ยอด ${deposit.amount} บาท (รหัส: ${deposit.id})`);
             io.emit('data_updated', { message: `🗑️ ลบประวัติการแจ้งฝากเงินแล้ว` });
             res.json({ status: 'success', message: 'ลบประวัติสำเร็จ' });
         } else {
@@ -391,7 +420,7 @@ app.post('/api/withdraw', async (req, res) => {
         const user = await User.findOne({ phone });
         if (!user || user.credit < amount) return res.status(400).json({ status: 'error', message: 'ยอดเงินไม่พอ' });
 
-        user.credit -= amount; // หักเงินทันที
+        user.credit -= amount; 
         await user.save();
 
         await Withdrawal.create({ id: 'WD' + Date.now().toString().slice(-6), phone, name: `${user.firstName} ${user.lastName}`, bankName: user.bankName, bankAccount: user.bankAccount, amount, status: 'pending' });
@@ -415,12 +444,11 @@ app.post('/api/admin/approve-withdraw', checkAuth, async (req, res) => {
             wd.status = 'approved';
             await wd.save();
             
-            // ดึงข้อมูลลูกค้ามาเพื่อส่งแจ้งเตือน (เงินถูกหักไปตั้งแต่ตอนกดถอนแล้ว จึงไม่ต้องหักซ้ำ)
             const user = await User.findOne({ phone: wd.phone });
             if (user) {
-                // 🟢 แจ้งเตือนลูกค้าว่าโอนเงินให้แล้ว
                 io.emit('credit_updated', { phone: user.phone, newCredit: user.credit, type: 'withdraw_success' });
             }
+            logActivity(req, '💳 อนุมัติถอนเงิน', wd.phone, `ยอด ${wd.amount} บาท (รหัส: ${wd.id})`);
         }
         io.emit('data_updated', { message: `✅ โอนเงินให้ลูกค้าแล้ว` });
         res.json({ status: 'success', message: 'อนุมัติเรียบร้อย' });
@@ -434,15 +462,13 @@ app.post('/api/admin/reject-withdraw', checkAuth, async (req, res) => {
             wd.status = 'rejected';
             await wd.save();
             
-            // คืนเครดิตให้ลูกค้า
             const user = await User.findOne({ phone: wd.phone });
             if (user) {
                 user.credit += wd.amount;
                 await user.save();
-                
-                // 🟢 แจ้งเตือนลูกค้าว่ายกเลิกการถอนและคืนเครดิตแล้ว
                 io.emit('credit_updated', { phone: user.phone, newCredit: user.credit, type: 'withdraw_reject' });
             }
+            logActivity(req, '❌ ปฏิเสธถอนเงิน', wd.phone, `คืนเครดิต ${wd.amount} บาท (รหัส: ${wd.id})`);
             res.json({ status: 'success', message: 'คืนเงินเรียบร้อย' });
         } else {
             res.status(400).json({ status: 'error', message: 'ไม่สามารถยกเลิกรายการนี้ได้' });
@@ -532,6 +558,7 @@ app.put('/api/bills/:billId', checkAuth, async (req, res) => {
 
 app.delete('/api/bills/:billId', checkAuth, async (req, res) => {
     await Bill.deleteOne({ billId: req.params.billId });
+    logActivity(req, '🧾 ลบบิลหวย', req.params.billId, `ลบโพยออก`);
     res.json({ status: 'success', message: 'ลบสำเร็จ' });
 });
 
@@ -674,10 +701,7 @@ app.post('/api/archive', checkAuth, async (req, res) => {
     await Bill.deleteMany({});
     res.json({ status: 'success', message: 'ตัดรอบบิลเรียบร้อยแล้ว' });
 });
-// ตัวอย่างโค้ดหลังบ้านตอนลูกค้ากดส่งโพย หรือ ทำรายการฝาก/ถอนสำเร็จ
-// ... (โค้ดบันทึกลง Database ของคุณ) ...
 
-// 🟢 เพิ่มบรรทัดนี้ลงไปเพื่อยิงสัญญาณไปที่หน้าแอดมิน
 io.emit('data_updated', { action: 'new_bill', message: 'มีโพยใหม่เข้า' });
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
