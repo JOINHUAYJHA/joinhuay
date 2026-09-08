@@ -481,7 +481,8 @@ app.post('/api/admin/reject-withdraw', checkAuth, async (req, res) => {
 // ==========================================
 app.post('/api/bills', async (req, res) => {
     try {
-        const { customerName, lineUserId, items } = req.body;
+        // 🔴 เพิ่มการรับค่า timestamp มาจากหน้าเว็บ
+        const { customerName, lineUserId, items, timestamp } = req.body;
         
         if (!items || !Array.isArray(items)) {
             return res.status(400).json({ status: 'error', message: 'ข้อมูลรายการไม่ถูกต้อง' });
@@ -500,7 +501,9 @@ app.post('/api/bills', async (req, res) => {
                     price: p, 
                     rate: parseFloat(i.rate) || 0,
                     status: 'pending', 
-                    winAmount: 0 
+                    winAmount: 0,
+                    memo: i.memo || "-", // 🔴 เซฟชื่อคนขาย
+                    realTimestamp: i.realTimestamp || Date.now() // 🔴 เซฟเวลาคีย์จริง
                 });
             }
         });
@@ -528,13 +531,39 @@ app.post('/api/bills', async (req, res) => {
             totalAmount, 
             items: validItems,
             status: 'pending',
-            winAmount: 0
+            winAmount: 0,
+            createdAt: timestamp || Date.now() // 🔴 บันทึกเวลาย้อนหลังได้
         });
 
         sendTelegramNotify(`🧾 โพยใหม่!\nลูกค้า: ${customerName || "ลูกค้าทั่วไป"}\nยอดรวม: ${totalAmount} ฿`);
         io.emit('data_updated', { message: `📥 มีบิลใหม่เข้า: ${customerName || "ลูกค้าทั่วไป"} (${totalAmount} ฿)` });
 
         res.json({ status: 'success', billId: billIdNew });
+    } catch (error) { res.status(500).json({ status: 'error', message: error.message }); }
+});
+
+app.get('/api/bills', checkAuth, async (req, res) => {
+    try {
+        const bills = await Bill.find().sort({ createdAt: -1 });
+        let flatData = [];
+        bills.forEach(b => {
+            b.items.forEach(i => {
+                // 🔴 ส่งข้อมูลกลับไปให้ครบ (เพิ่ม memo และ realTimestamp)
+                flatData.push({ 
+                    category: i.category, 
+                    billId: b.billId, 
+                    timestamp: b.createdAt, 
+                    realTimestamp: i.realTimestamp || b.createdAt,
+                    customer: b.customerName, 
+                    type: i.type, 
+                    number: i.number, 
+                    price: i.price, 
+                    status: i.status,
+                    memo: i.memo || "-" 
+                });
+            });
+        });
+        res.json({ status: 'success', data: flatData });
     } catch (error) { res.status(500).json({ status: 'error', message: error.message }); }
 });
 
