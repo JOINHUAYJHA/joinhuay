@@ -90,43 +90,111 @@ const sendTelegramNotify = async (message) => {
   } catch (error) { console.error('❌ ส่ง Telegram ไม่สำเร็จ'); }
 };
 
+
+
 // ==========================================
-// 🔐 ระบบยืนยันตัวตนพื้นฐาน (Token)
+// 👨‍💼 ระบบพนักงาน (Employee Schema)
 // ==========================================
-const checkAuth = (req, res, next) => {
-  const pin = req.headers['authorization'];
-  if (pin === (process.env.ADMIN_PIN || "1234")) next();
-  else res.status(403).json({ status: 'error', message: 'Unauthorized: ปฏิเสธการเข้าถึง' });
+const employeeSchema = new mongoose.Schema({
+    username: { type: String, required: true, unique: true },
+    password: { type: String, required: true },
+    name: { type: String, required: true },
+    role: { type: String, default: 'employee' },
+    token: { type: String },
+    createdAt: { type: Date, default: Date.now }
+});
+const Employee = mongoose.model('Employee', employeeSchema);
+
+let currentAdminOTP = null; // ตัวแปรเก็บรหัส OTP ชั่วคราว
+
+// ==========================================
+// 🔐 ระบบยืนยันตัวตน (รองรับ แอดมินหลัก + พนักงาน)
+// ==========================================
+const checkAuth = async (req, res, next) => {
+    const token = req.headers['authorization'];
+    if (!token) return res.status(403).json({ status: 'error', message: 'Unauthorized' });
+
+    // 1. เช็คว่าเป็น Master Admin (เจ้าของเว็บ) ใช้ PIN เดิม
+    if (token === (process.env.ADMIN_PIN || "1234")) {
+        req.user = { role: 'master', name: 'Admin Master' };
+        return next();
+    }
+
+    // 2. เช็คว่าเป็น พนักงาน (Employee)
+    try {
+        const emp = await Employee.findOne({ token: token });
+        if (emp) {
+            req.user = { role: emp.role, name: emp.name, id: emp._id };
+            return next();
+        }
+    } catch (e) {}
+
+    res.status(403).json({ status: 'error', message: 'Unauthorized: ปฏิเสธการเข้าถึง' });
 };
 
-// ตัวแปรเก็บ OTP ชั่วคราว (สำหรับแอดมินคนเดียว)
-let currentAdminOTP = null;
+// API เข้าสู่ระบบโฉมใหม่ (แยกเจ้าของ กับ พนักงาน)
+app.post('/api/admin/login', async (req, res) => {
+    const { username, password } = req.body;
 
-app.post('/api/verify_pin', async (req, res) => {
-  if (req.body.pin === (process.env.ADMIN_PIN || "1234")) {
-      // สร้าง OTP 6 หลัก
-      currentAdminOTP = Math.floor(100000 + Math.random() * 900000).toString();
-      
-      // ส่งแจ้งเตือนผ่าน Telegram
-      await sendTelegramNotify(`🔐 <b>แจ้งเตือนเข้าสู่ระบบแอดมิน</b>\n🔑 รหัส OTP ของคุณคือ: <b>${currentAdminOTP}</b>\n⏳ รหัสใช้ได้ครั้งเดียว`);
-      
-      // 🔴 แก้ไขบรรทัดนี้: เปลี่ยนจาก 'success' เป็น 'require_otp'
-      res.json({ status: 'require_otp', message: 'OTP_SENT' }); 
-  } else {
-      res.status(401).json({ status: 'error', message: 'รหัส PIN ไม่ถูกต้อง' });
-  }
+    // 1. ตรวจสอบแอดมินหลัก (พิมพ์ User: admin, Pass: รหัส PIN 4 หลัก)
+    if (username === 'admin' && password === (process.env.ADMIN_PIN || "1234")) {
+        currentAdminOTP = Math.floor(100000 + Math.random() * 900000).toString();
+        await sendTelegramNotify(`🔐 <b>แจ้งเตือนเข้าสู่ระบบแอดมินหลัก</b>\n🔑 รหัส OTP คือ: <b>${currentAdminOTP}</b>\n⏳ รหัสใช้ได้ครั้งเดียว`);
+        return res.json({ status: 'require_otp', message: 'ส่ง OTP ไป Telegram แล้ว', role: 'master' });
+    }
+
+    // 2. ตรวจสอบพนักงาน
+    try {
+        const emp = await Employee.findOne({ username, password });
+        if (emp) {
+            const newToken = 'EMP-' + Math.random().toString(36).substr(2) + Date.now().toString(36);
+            emp.token = newToken;
+            await emp.save();
+            
+            await sendTelegramNotify(`👨‍💼 <b>พนักงานเข้าสู่ระบบ</b>\nชื่อ: ${emp.name}\nUser: ${emp.username}`);
+            return res.json({ status: 'success', token: newToken, role: emp.role, name: emp.name });
+        }
+    } catch (e) {}
+
+    res.status(401).json({ status: 'error', message: 'ชื่อผู้ใช้ หรือ รหัสผ่าน ไม่ถูกต้อง' });
 });
 
-// 2. ตรวจสอบรหัส OTP
-app.post('/api/verify_otp', (req, res) => {
-    if (currentAdminOTP && req.body.otp === currentAdminOTP) {
-        currentAdminOTP = null; // เคลียร์ OTP ทิ้งทันทีเพื่อความปลอดภัย
-        res.json({ status: 'success', message: 'OK' });
+// ยืนยัน OTP (สำหรับแอดมินหลักเท่านั้น)
+app.post('/api/admin/verify_otp', async (req, res) => {
+    const { otp } = req.body;
+    if (currentAdminOTP && otp === currentAdminOTP) {
+        currentAdminOTP = null;
+        res.json({ status: 'success', token: (process.env.ADMIN_PIN || "1234"), role: 'master', name: 'Admin Master' });
     } else {
         res.status(401).json({ status: 'error', message: 'รหัส OTP ไม่ถูกต้อง' });
     }
 });
 
+// ==========================================
+// 👨‍💼 API สำหรับจัดการบัญชีพนักงาน (เพิ่ม/ลบ/ดู)
+// ==========================================
+app.get('/api/admin/employees', checkAuth, async (req, res) => {
+    if (req.user.role !== 'master') return res.status(403).json({ status: 'error', message: 'เฉพาะแอดมินหลักเท่านั้น' });
+    const emps = await Employee.find({}, '-password').sort({ createdAt: -1 });
+    res.json({ status: 'success', data: emps });
+});
+
+app.post('/api/admin/employees', checkAuth, async (req, res) => {
+    if (req.user.role !== 'master') return res.status(403).json({ status: 'error', message: 'ไม่มีสิทธิ์' });
+    try {
+        const newEmp = new Employee({ username: req.body.username, password: req.body.password, name: req.body.name });
+        await newEmp.save();
+        res.json({ status: 'success', message: 'เพิ่มบัญชีพนักงานสำเร็จ' });
+    } catch(e) {
+        res.status(400).json({ status: 'error', message: 'Username นี้มีการใช้งานแล้วค่ะ' });
+    }
+});
+
+app.delete('/api/admin/employees/:id', checkAuth, async (req, res) => {
+    if (req.user.role !== 'master') return res.status(403).json({ status: 'error', message: 'ไม่มีสิทธิ์' });
+    await Employee.findByIdAndDelete(req.params.id);
+    res.json({ status: 'success', message: 'ลบพนักงานเรียบร้อย' });
+});
 // ==========================================
 // 👤 API ระบบสมาชิกลูกค้า
 // ==========================================
