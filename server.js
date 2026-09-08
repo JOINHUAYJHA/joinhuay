@@ -102,20 +102,19 @@ const checkAuth = (req, res, next) => {
 // ตัวแปรเก็บ OTP ชั่วคราว (สำหรับแอดมินคนเดียว)
 let currentAdminOTP = null;
 
-// 1. ตรวจสอบ PIN และส่ง OTP เข้า Telegram
 app.post('/api/verify_pin', async (req, res) => {
-    // เช็ค PIN จากไฟล์ .env หรือค่าเริ่มต้น 1234
-    if (req.body.pin === (process.env.ADMIN_PIN || "1234")) {
-        // สร้าง OTP 6 หลัก
-        currentAdminOTP = Math.floor(100000 + Math.random() * 900000).toString();
-        
-        // ส่งแจ้งเตือนผ่านฟังก์ชันที่มีอยู่แล้ว
-        await sendTelegramNotify(`🔐 <b>แจ้งเตือนเข้าสู่ระบบแอดมิน</b>\n🔑 รหัส OTP ของคุณคือ: <b>${currentAdminOTP}</b>\n⏳ รหัสใช้ได้ครั้งเดียว`);
-        
-        res.json({ status: 'success', message: 'OTP_SENT' });
-    } else {
-        res.status(401).json({ status: 'error', message: 'รหัส PIN ไม่ถูกต้อง' });
-    }
+  if (req.body.pin === (process.env.ADMIN_PIN || "1234")) {
+      // สร้าง OTP 6 หลัก
+      currentAdminOTP = Math.floor(100000 + Math.random() * 900000).toString();
+      
+      // ส่งแจ้งเตือนผ่าน Telegram
+      await sendTelegramNotify(`🔐 <b>แจ้งเตือนเข้าสู่ระบบแอดมิน</b>\n🔑 รหัส OTP ของคุณคือ: <b>${currentAdminOTP}</b>\n⏳ รหัสใช้ได้ครั้งเดียว`);
+      
+      // 🔴 แก้ไขบรรทัดนี้: เปลี่ยนจาก 'success' เป็น 'require_otp'
+      res.json({ status: 'require_otp', message: 'OTP_SENT' }); 
+  } else {
+      res.status(401).json({ status: 'error', message: 'รหัส PIN ไม่ถูกต้อง' });
+  }
 });
 
 // 2. ตรวจสอบรหัส OTP
